@@ -98,8 +98,7 @@ library(zoo)
     select(country = 1,2,age_dependency=3, urban_pop = 4,   gross_savings = 6, inflation_cp = 5, inflation_def = 7) 
   Base_WDI <- Base_WDI %>%    
     mutate(country = trimws(gsub("[^a-zA-Z &.].*", "", country)), year = as.numeric(substr(year,1,4)), across(c(3:7), as.numeric))
-  #, age_dependency = ifelse(grepl(pattern = "*..*", age_dependency), NA, as.numeric(age_dependency)))
-  #print(Base_WDI %>% group_by(country) %>% summarise(n=n()), n = 100)
+  
  
 
 #----Criando e Transformando Variáveis-------------------------#
@@ -137,17 +136,18 @@ library(zoo)
   Base_WDI.limpa <- Base_WDI %>% mutate(inflation = ifelse(!is.na(inflation_def), inflation_def, inflation_cp)) %>% 
     select(c(1:5), inflation)
   
-  #2)
+  #2) 
   Base_PWT.AL.limpa <- Base_PWT.AL %>% group_by(country) %>% 
     mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = log(realgdp.pc) - log(dplyr::lag(realgdp.pc)), g.avg5.realgdp.pc = (log(dplyr::lead(realgdp.pc, 5)) - log(dplyr::lead(realgdp.pc,1)))/5, g.pop = log(pop) - log(dplyr::lag(pop)), trade.gdp = (x_share + abs(m_share)) + r_share) %>%
     ungroup() %>% 
     select((1:3),5,g_share,c(10:14))
   
-  Base_PWT.AL.limpa2 <- Base_PWT.AL %>% group_by(country) %>% 
-    mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = (realgdp.pc/dplyr::lag(realgdp.pc)) - 1, g.avg5.realgdp.pc = ((dplyr::lead(realgdp.pc, 5)/dplyr::lead(realgdp.pc,1)) -1 )/5, g.pop = (pop/dplyr::lag(pop)) - 1, trade.gdp = (x_share + abs(m_share)) + r_share) %>%
-    ungroup() %>% 
-    select((1:3),5,g_share,c(10:14))
-  
+    #Foma diferente de calcular taxa de crescimento (???)
+    Base_PWT.AL.limpa2 <- Base_PWT.AL %>% group_by(country) %>% 
+      mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = (realgdp.pc/dplyr::lag(realgdp.pc)) - 1, g.avg5.realgdp.pc = ((dplyr::lead(realgdp.pc, 5)/dplyr::lead(realgdp.pc,1)) -1 )/5, g.pop = (pop/dplyr::lag(pop)) - 1, trade.gdp = (x_share + abs(m_share)) + r_share) %>%
+      ungroup() %>% 
+      select((1:3),5,g_share,c(10:14))
+    
   #----------Consolidando Base com Variáveis de interesse-------------------------#
   #Juntando informações, filtrando pelo último ano em que a média do cresciemento futuro está disponível
   #Multiplicando crescimentos por 100 para ficar em % e níveis colocados em log
@@ -162,19 +162,17 @@ library(zoo)
     filter(!country %in% c("Bahamas","Barbados","Grenada", "Guyana", "St. Vincent and the Grenadines","Ecuador", "Nicaragua"))
                                                                         
   
-  Base_Consolidada %>% group_by(country) %>% mutate(debt_gdp =  approx(debt_gdp, ties=ordered))
-  uruguay <- Base_Consolidada %>% filter(country == "Uruguay")
+  Base_Consolidada2 <- Base_Consolidada %>% group_by(country) %>% mutate(debt_gdp =  na.approx(debt_gdp))
   
   
-  ggplot(data = Base_Consolidada,aes(x = year, y = debt_gdp) ) +
+  
+  ggplot(data = Base_Consolidada2,aes(x = year, y = debt_gdp) ) +
     geom_line() +
     facet_wrap(.~country)
   #rm(list = setdiff(ls(), c("Base_Consolidada", "Lista_paises_aptos")))
   
-  #print(Base_Consolidada %>% group_by(country) %>% summarise(pop = last(pop)) %>% filter(pop<1), n = 100)
-  #print(Base_Consolidada %>% group_by(country) %>% summarise(stderro.gdp = sd(g.realgdp.pc, na.rm = T), stderro.div = sd(debt_gdp, na.rm = T) ) %>% arrange(desc(stderro.div)), n =100)
+   
   
-  print(Base_Consolidada %>% filter(country %in% c("Uruguay", "Jamaica"))%>% dplyr::select(1:4))
   
 #C) Regressão ####
   #newey west (correção de heterocedasticidade e autocorrelação)
@@ -183,17 +181,17 @@ library(zoo)
     
   #Crescimento Contemporâneo; Sem Controle
     modelo1 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada, model = "pooling")
-    summary(modelo1)  
+    summary(modelo1, vcov = vcovNW)  
       #Resultado: -0.01999 com significância a 0.01
     
     #Crescimento Médio Futuro; Sem Controle
     modelo2 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada, model = "pooling")
-    summary(modelo2)
+    summary(modelo2, vcov = vcovNW)
       #Resultado: -0.000361 sem significância  
     
     #Crescimento Médio Futuro; Com Controle
     modelo3 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada, model = "pooling")
-    summary(modelo3)
+    summary(modelo3, vcov = vcovNW)
       #Resultado: +0.004744 sem significância  
   
 #Bloco Com Especificações de Ash et al. (2020) ----------#
@@ -202,12 +200,12 @@ library(zoo)
     
     #Crescimento Contemporâneo; Sem Controle
     modelo4 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada, effect = "time")
-    summary(modelo4)  
+    summary(modelo4, vcov = vcovNW)  
       #Resultado: -0.01028 com significância a 0.01
     
     #Crescimento Médio Futuro; Sem Controle
     modelo5 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada, effect = "time")
-    summary(modelo5)
+    summary(modelo5, vcov = vcovNW)
       #Resultado: -0.00303 sem significância
     
     #Crescimento Médio Futuro; Com Controle
@@ -219,85 +217,85 @@ library(zoo)
     
     #Crescimento Contemporâneo; Sem Controle
     modelo7 <- plm(g.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo7)  
+    summary(modelo7, vcov = vcovNW)  
     #Resultado: -0.00745 com significância a 0.05
     
     #Crescimento Médio Futuro; Sem Controle
     modelo8 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo8)
+    summary(modelo8, vcov = vcovNW)
     #Resultado: -0.00256 sem significância
     
     #Crescimento Médio Futuro; Com Controle
     modelo9 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo9)
+    summary(modelo9, vcov = vcovNW)
     #Resultado: -0.008516 sem significância
     
   #Com FE de tempo + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo10 <- plm(g.realgdp.pc ~ debt_gdp | . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo10)
+    summary(modelo10, vcov = vcovNW)
     #Resultado: -0.00724 sem significancia
     
     #Crescimento Médio Futuro; Sem Controle
     modelo11 <- plm(g.avg5.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo11)
+    summary(modelo11, vcov = vcovNW)
     #Resultado: 0.00379 sem significância
     
     #Crescimento Médio Futuro; Com Controle
     modelo12 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo12)
+    summary(modelo12, vcov = vcovNW)
     #Resultado: 0.0077858 sem significância
     
   #Com FE de tempo + Controle de Crescimento Lagado + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo13 <- plm(g.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1)| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo13)
+    summary(modelo13, vcov = vcovNW)
     #Resultado: -0.00594 sem significancia
     
     #Crescimento Médio Futuro; Sem Controle
     modelo14 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1)| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
-    summary(modelo14)
+    summary(modelo14, vcov = vcovNW)
     #Resultado: 0.00413 sem significância
     
     #Crescimento Médio Futuro; Com Controle
     modelo15 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time", index = c("country", "year"))
-    summary(modelo15)
+    summary(modelo15, vcov = vcovNW)
     #Resultado: 0.0075700 sem significância
   
   #Com FE de tempo e de país 
     
     #Crescimento Contemporâneo; Sem Controle
     modelo16 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo16)  
+    summary(modelo16, vcov = vcovNW)  
     #Resultado: -0.00701 com significância a 0.05
     
     #Crescimento Médio Futuro; Sem Controle
     modelo17 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo17)
+    summary(modelo17, vcov = vcovNW)
     #Resultado: -0.000688 sem significância
     
     #Crescimento Médio Futuro; Com Controle
     modelo18 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo18)
+    summary(modelo18, vcov = vcovNW)
     #Resultado: 0.0110775 sem significância 
     
   #Com FE de tempo e de país + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo19 <- plm(g.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo19)  
+    summary(modelo19, vcov = vcovNW)  
     #Resultado: 0.0224 com significância a 0.05
     
     #Crescimento Médio Futuro; Sem Controle
     modelo20 <- plm(g.avg5.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo20)
+    summary(modelo20, vcov = vcovNW)
     #Resultado: 0.0281 sem significância
     
     #Crescimento Médio Futuro; Com Controle
     modelo21 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
-    summary(modelo21)
+    summary(modelo21, vcov = vcovNW)
     #Resultado: 0.023057 sem significância 
     
     plmtest(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5),data = Base_Consolidada, effect = "twoways", type ="ghm")
