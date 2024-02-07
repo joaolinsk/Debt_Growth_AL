@@ -10,7 +10,7 @@
 
 #Git: italopedrosa
 #mudança
-#arroz
+
 
 #limpando
 rm(list = ls())
