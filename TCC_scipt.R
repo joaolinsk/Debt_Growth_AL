@@ -30,7 +30,7 @@ library(zoo)
 #A) Heimberger####
 
   #Base de artigos Heimberger
-  BaseH <- read.csv("base_heimberger.csv")
+  BaseH <- read.csv(file = "G:\\Meu Drive\\Economia Facul\\TCC\\TCC\\base_heimberger.csv")
 
 
   #Apenas obs de artigos que lidam com reversão causal e endogeneidade 
@@ -44,11 +44,7 @@ library(zoo)
   
   
   Ash <- BaseH %>% filter(paperid == 5)
-#Montando Base###
-  
 
-#-----------------------Montando Base--------------------------#
-  
  
 #B) Montando Base ####
   
@@ -62,7 +58,7 @@ library(zoo)
   Base_Mbaye.AL <- Base_Mbaye %>% filter(dept == "WHD", ! country %in% c("United States", "Canada")) %>%
     mutate(country = trimws(gsub("[^a-zA-Z &.].*", "", country))) %>% 
     select(-1,-2,-5)
-    #mutate(country = ifelse(test = grepl(pattern = ",", country) ==1 , sapply(strsplit(country, ","), `[`, 1), country))
+  
   
   #Ano Mínimo com dados disponíveis para cada país
   Lista_ano_min <- Base_Mbaye.AL %>% filter(! is.na(Base_Mbaye.AL$ps_data)|! is.na(Base_Mbaye.AL$nfps_data)| ! is.na(Base_Mbaye.AL$gg_data)| ! is.na(Base_Mbaye.AL$cg_data)) %>% group_by(country) %>% summarise(ano_min = min(year))
@@ -79,10 +75,10 @@ library(zoo)
 #---------------PWT1001-----------------------------------------------#
   #Dados PWT #### Puxando colunas desejadas \\ simplificando nomes (Bahama, Bolivia e Venezuela possuiem nomes ligeiramente diferentes)
     #Renomeando colunas
-  Base_PWT <- read.xlsx("G:\\Meu Drive\\Economia Facul\\TCC\\TCC\\base_pwt1001.xlsx", sheet = "Data", colNames = T, cols = c(2,4,7,14,29,42:45)) %>% 
+  Base_PWT <- read.xlsx("G:\\Meu Drive\\Economia Facul\\TCC\\TCC\\base_pwt1001.xlsx", sheet = "Data", colNames = T, cols = c(2,4,6,7,29,42:45)) %>% 
     mutate(country = trimws(gsub("[^a-zA-Z &.].*", "", country))) %>% 
-    rename(realgdp = 4, exchg_rate = 5, g_share = 6, x_share = 7, m_share = 8, r_share = 9)
-  
+    rename(realgdp = 3, exchg_rate = 5, g_share = 6, x_share = 7, m_share = 8, r_share = 9) %>% 
+    select(1,2,4,3, everything())
   
   #Filtrando países aptos e dados a partir de 1970
   Base_PWT.AL <- dplyr::filter(Base_PWT, country %in% Lista_paises_aptos$country, year >= 1969)
@@ -115,17 +111,39 @@ library(zoo)
   #1)
   # a)Quais países tem deficiência nos dados da dívida do governo central (variável mais presente entre os países da AL)?
   # prioridade: cg > gg > nfps > ps
-  Base_Mbaye.AL %>% group_by(country) %>% summarise_all(~sum(!is.na(.))) %>% filter(cg < 49)
+  Lista_divida <- Base_Mbaye.AL %>% group_by(country) %>% summarise_all(~sum(!is.na(.)))
   
-  #View(Base_Mbaye.AL %>% filter(is.na(cg)))
-  #View(Base_Mbaye.AL %>% filter(country == "Nicaragua"))
   
-  # Nicaragua tem muitas observações com a dívida = public sector, que é bem diferente. Será que é melhor tirar
+  #Base que Escolhe só países que possuem dados completos de dívida pública (cg ou nfps)
+  #Panama e Nicaragua são retirados pois 
+  Base_Mbaye.AL.mix <- Base_Mbaye.AL %>% mutate(debt_gdp = ifelse(!country %in% c("Ecuador","Dominican Republic", "Panama" ), cg,
+                                                                  ifelse(!country %in% c("Panama"),nfps, gg))) %>% 
+    select(country, year, debt_gdp) %>% dplyr::filter(country != "Nicaragua") %>%  ungroup()
+      #Para Jamaica e Uruguai, falta algum (pouco) dado da dívida.mix
   
-  Base_Mbaye.AL.limpa <- Base_Mbaye.AL %>% mutate(debt_gdp = ifelse(!is.na(cg), cg,
-                                                              ifelse(!is.na(gg), gg,
-                                                                     ifelse(!is.na(nfps), nfps, ps)))) %>% 
-    select(country, year, debt_gdp)
+  #Base que usa apenas dívida do governo central, priorizando coerência
+    #Países com muitos dados de cg faltantes: Rep. Domenicana, Equador, Nicaragua e Panamá
+  
+  Base_Mbaye.AL.cg <-  Base_Mbaye.AL %>% rename(debt_gdp =cg) %>%
+    filter(country %in% (Lista_divida %>% filter(cg>40))$country) %>% 
+    select(country, year, debt_gdp) %>% ungroup()
+      #Para Jamaica, Mexico, St Vicent, Uruguai falta algum (pouco) dado da dívida cg
+      
+      #Justificando o uso da estatística nfsp em vez de cg para Equador e RepDom
+          equador <- Base_Mbaye.AL %>% filter(country == "Ecuador", year>=1990) %>% select(1:6)
+          cor(equador$cg, equador$nfps)
+          repdom <- Base_Mbaye.AL %>% filter(country == "Dominican Republic", year>=2000) %>% select(1:6)
+          cor(repdom$cg, repdom$nfps)
+  
+      #Checando se há valores faltando
+        print(Base_Mbaye.AL.mix %>% group_by(country) %>% summarise_all(~sum(!is.na(.))), n =30)
+        ggplot(data = Base_Mbaye.AL.cg ,aes(x = year, y = debt_gdp) ) + geom_line() + facet_wrap(.~country)
+      
+  #Interpolação de dados faltantes
+    Base_Mbaye.AL.mix <- Base_Mbaye.AL.mix %>% group_by(country) %>% mutate(debt_gdp =  na.approx(debt_gdp)) %>% ungroup()
+    Base_Mbaye.AL.cg <- Base_Mbaye.AL.cg %>% group_by(country) %>% mutate(debt_gdp =  na.approx(debt_gdp)) %>% ungroup()
+  
+  
   
   # b)Quais países tem deficiência nos dados do deflator do pib (variável mais presente entre os países da AL)?
   # melhor usar o deflator do que o "ao consumidor", pois tem mais dados
@@ -137,42 +155,72 @@ library(zoo)
   Base_WDI.limpa <- Base_WDI %>% mutate(inflation = ifelse(!is.na(inflation_def), inflation_def, inflation_cp)) %>% 
     select(c(1:5), inflation)
   
-  #2) 
-  Base_PWT.AL.limpa <- Base_PWT.AL %>% group_by(country) %>% 
-    mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = log(realgdp.pc) - log(dplyr::lag(realgdp.pc)), g.avg5.realgdp.pc = (log(dplyr::lead(realgdp.pc, 5)) - log(dplyr::lead(realgdp.pc,1)))/5, g.pop = log(pop) - log(dplyr::lag(pop)), trade.gdp = (x_share + abs(m_share)) + r_share) %>%
+    #Checando se há valores faltando
+    print(Base_WDI.limpa %>% group_by(country) %>% summarise_all(~sum(!is.na(.))), n =30)
+    #Quase não há dados para gross_savings!!!!
+  
+  
+  #2)
+  #Forma log para calcular taxa de crescimento
+  Base_PWT.AL.limpa1 <- Base_PWT.AL %>% group_by(country) %>% 
+    mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = log(realgdp.pc) - log(dplyr::lag(realgdp.pc)), g.avg5.realgdp.pc = (log(dplyr::lead(realgdp.pc, 6)) - log(dplyr::lead(realgdp.pc,1)))/5, g.pop = log(pop) - log(dplyr::lag(pop)), trade.gdp = (x_share + abs(m_share)) + r_share) %>%
     ungroup() %>% 
     select((1:3),5,g_share,c(10:14))
   
-    #Foma diferente de calcular taxa de crescimento (???)
-    Base_PWT.AL.limpa2 <- Base_PWT.AL %>% group_by(country) %>% 
-      mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = (realgdp.pc/dplyr::lag(realgdp.pc)) - 1, g.avg5.realgdp.pc = ((dplyr::lead(realgdp.pc, 5)/dplyr::lead(realgdp.pc,1)) -1 )/5, g.pop = (pop/dplyr::lag(pop)) - 1, trade.gdp = (x_share + abs(m_share)) + r_share) %>%
-      ungroup() %>% 
-      select((1:3),5,g_share,c(10:14))
-    
+  #Foma padrão para calcular taxa de crescimento 
+  Base_PWT.AL.limpa2 <- Base_PWT.AL %>% group_by(country) %>% 
+    mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = (realgdp.pc/dplyr::lag(realgdp.pc)) - 1, g.avg5.realgdp.pc = ((dplyr::lead(realgdp.pc, 6)/dplyr::lead(realgdp.pc,1)) -1 )/5, g.pop = (pop/dplyr::lag(pop)) - 1, trade.gdp = (x_share + abs(m_share)) + r_share) %>%
+    ungroup() %>% 
+    select((1:3),5,g_share,c(10:14))
+  
+  #Foma média ipsis litteris de cálculo da média da taxa de crescimento
+  Base_PWT.AL.limpa3 <- Base_PWT.AL %>% group_by(country) %>% 
+    mutate(realgdp.pc = realgdp/pop, g.realgdp.pc = (realgdp.pc/dplyr::lag(realgdp.pc)) - 1, g.avg5.realgdp.pc = (dplyr::lead(g.realgdp.pc,1) + dplyr::lead(g.realgdp.pc,2) +dplyr::lead(g.realgdp.pc,3)+dplyr::lead(g.realgdp.pc,4)+dplyr::lead(g.realgdp.pc,5))/5, g.pop = (pop/dplyr::lag(pop)) - 1, trade.gdp = (x_share + abs(m_share)) + r_share) %>%
+    ungroup() %>% 
+    select((1:3),5,g_share,c(10:14))
+  
+  
+  
+  
+  
   #----------Consolidando Base com Variáveis de interesse-------------------------#
-  #Juntando informações, filtrando pelo último ano em que a média do cresciemento futuro está disponível
-  #Multiplicando crescimentos por 100 para ficar em % e níveis colocados em log
-  # 
-  #Retirando países com menos de 1M de habitantes em 2014 ("Bahamas","Barbados","Grenada", "Guyana", "St. Vincent and the Grenadines")
-  #Retirando países por outros motivos
-  Base_Consolidada <- left_join(Base_Mbaye.AL.limpa, Base_PWT.AL.limpa2, by = c("country", "year")) %>% 
-    left_join(Base_WDI.limpa, by = c("country", "year")) %>% filter(year < 2015) %>% 
-    dplyr::select(1:2,g.avg5.realgdp.pc ,debt_gdp, g.realgdp.pc, pop, g.pop,age_dependency,realgdp.pc, urban_pop, exchg_rate, trade.gdp, g_share, gross_savings, inflation) %>% 
-    mutate(country = as.factor(country),g.avg5.realgdp.pc = g.avg5.realgdp.pc * 100, g.realgdp.pc = g.realgdp.pc*100,
-           g.pop = g.pop*100, pop = log(pop), realgdp.pc = log(realgdp.pc), exchg_rate = log(exchg_rate), trade.gdp = trade.gdp*100, g_share = g_share *100  ) %>% 
-    filter(!country %in% c("Bahamas","Barbados","Grenada", "Guyana", "St. Vincent and the Grenadines","Ecuador", "Nicaragua"))
-                                                                        
   
-  Base_Consolidada2 <- Base_Consolidada %>% group_by(country) %>% mutate(debt_gdp =  na.approx(debt_gdp))
+  ### BASE PRINCIPAL
+    
+    #Juntando informações, filtrando pelo último ano em que a média do cresciemento futuro está disponível
+    Base_Consolidada <- left_join(Base_Mbaye.AL.mix, Base_PWT.AL.limpa2, by = c("country", "year")) %>% 
+      left_join(Base_WDI.limpa, by = c("country", "year")) %>% filter(year <=2013)
+    
+    #Checando se há valores faltando
+      print(Base_Consolidada %>% group_by(country) %>% summarise_all(~sum(!is.na(.))) %>% select(-c(2:5)), n =30)
+      print(Base_Consolidada  %>% filter(rowSums(is.na(.)) > 0))
+    
+    #Ordenando Colunas e retirando variável de Gross_Savings por falta de dados!!!!
+    Base_Consolidada <- Base_Consolidada %>% 
+      dplyr::select(1:2,g.avg5.realgdp.pc ,debt_gdp, g.realgdp.pc, pop, g.pop,age_dependency,realgdp.pc, urban_pop, exchg_rate, trade.gdp, g_share, inflation)
+      
+    #Multiplicando crescimentos por 100 para ficar em % e níveis colocados em log
+    #Retirando países com menos de 1M de habitantes em 2014 ("Bahamas","Barbados","Grenada", "Guyana", "St. Vincent and the Grenadines")
+    #Retirando países por outros motivos (Ecuador, Panama, El Salvador utiliza Dólar USD, Nicarágua possui dados ruins para a dívida)
+    Lista_final <- Base_Consolidada %>% group_by(country) %>% filter(year==2013 & pop >= 1, !country %in% c("Panama", "Nicaragua")) %>% select(country) %>% pull()
+    
+    Base_Consolidada <-  Base_Consolidada %>% 
+      mutate(country = as.factor(country),g.avg5.realgdp.pc = g.avg5.realgdp.pc * 100, g.realgdp.pc = g.realgdp.pc*100,
+             g.pop = g.pop*100, pop = log(pop), realgdp.pc = log(realgdp.pc), exchg_rate = log(exchg_rate), trade.gdp = trade.gdp*100, g_share = g_share *100  ) %>% 
+      filter(country %in% Lista_final) %>% ungroup()
+    
+      
   
-  
-  
-  ggplot(data = Base_Consolidada2,aes(x = year, y = debt_gdp) ) +
+  ggplot(data = Base_Consolidada,aes(x = year, y = debt_gdp) ) +
+    geom_line() +
+    facet_wrap(.~country)
+  ggplot(data = Base_Consolidada,aes(x = year, y = g.avg5.realgdp.pc) ) +
     geom_line() +
     facet_wrap(.~country)
   #rm(list = setdiff(ls(), c("Base_Consolidada", "Lista_paises_aptos")))
   
-   
+  
+  ### VARIAÇÕES DA BASE PRINCIPAL
   
   
 #C) Regressão ####
@@ -182,18 +230,18 @@ library(zoo)
     
   #Crescimento Contemporâneo; Sem Controle
     modelo1 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada, model = "pooling")
-    summary(modelo1, vcov = vcovNW)  
-      #Resultado: -0.01999 com significância a 0.01
+    summary(modelo1, vcov = vcovNW)
+      #Resultado: -0.02667 com significância a 0.001
     
     #Crescimento Médio Futuro; Sem Controle
     modelo2 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada, model = "pooling")
     summary(modelo2, vcov = vcovNW)
-      #Resultado: -0.000361 sem significância  
+      #Resultado: 0.00818 sem significância  
     
     #Crescimento Médio Futuro; Com Controle
-    modelo3 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada, model = "pooling")
+    modelo3 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + inflation, data = Base_Consolidada, model = "pooling")
     summary(modelo3, vcov = vcovNW)
-      #Resultado: +0.004744 sem significância  
+      #Resultado: 0.007176 sem significância  
   
 #Bloco Com Especificações de Ash et al. (2020) ----------#
   
@@ -202,104 +250,114 @@ library(zoo)
     #Crescimento Contemporâneo; Sem Controle
     modelo4 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada, effect = "time")
     summary(modelo4, vcov = vcovNW)  
-      #Resultado: -0.01028 com significância a 0.01
+      #Resultado: -0.02135 com significância a 0.01
     
     #Crescimento Médio Futuro; Sem Controle
     modelo5 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada, effect = "time")
     summary(modelo5, vcov = vcovNW)
-      #Resultado: -0.00303 sem significância
+      #Resultado: -0.00161 sem significância
     
     #Crescimento Médio Futuro; Com Controle
-    modelo6 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada, effect = "time")
+    modelo6 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + inflation, data = Base_Consolidada, effect = "time")
     summary(modelo6)
-    #Resultado: -0.008903 sem significância 
+    #Resultado: -0.003594 sem significância 
   
   #Com FE de tempo + Controle de Crescimento Lagado
     
     #Crescimento Contemporâneo; Sem Controle
     modelo7 <- plm(g.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo7, vcov = vcovNW)  
-    #Resultado: -0.00745 com significância a 0.05
+    #Resultado: -0.01450 com significância a 0.01
     
     #Crescimento Médio Futuro; Sem Controle
     modelo8 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo8, vcov = vcovNW)
-    #Resultado: -0.00256 sem significância
+    #Resultado: -0.000993 sem significância
     
     #Crescimento Médio Futuro; Com Controle
-    modelo9 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada, effect = "time",index = c("country", "year"))
+    modelo9 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + inflation, data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo9, vcov = vcovNW)
-    #Resultado: -0.008516 sem significância
+    #Resultado: -0.003034 sem significância
     
   #Com FE de tempo + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo10 <- plm(g.realgdp.pc ~ debt_gdp | . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo10, vcov = vcovNW)
-    #Resultado: -0.00724 sem significancia
+    #Resultado: -0.00487 sem significancia
     
     #Crescimento Médio Futuro; Sem Controle
     modelo11 <- plm(g.avg5.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo11, vcov = vcovNW)
-    #Resultado: 0.00379 sem significância
+    #Resultado: 0.0110 sem significância
     
     #Crescimento Médio Futuro; Com Controle
-    modelo12 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
+    modelo12 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share +  inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo12, vcov = vcovNW)
-    #Resultado: 0.0077858 sem significância
+    #Resultado: 0.016574 sem significância
     
   #Com FE de tempo + Controle de Crescimento Lagado + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo13 <- plm(g.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1)| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo13, vcov = vcovNW)
-    #Resultado: -0.00594 sem significancia
+    #Resultado: -0.00408 sem significancia
     
     #Crescimento Médio Futuro; Sem Controle
     modelo14 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1)| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time",index = c("country", "year"))
     summary(modelo14, vcov = vcovNW)
-    #Resultado: 0.00413 sem significância
+    #Resultado: 0.0111 sem significância
     
     #Crescimento Médio Futuro; Com Controle
-    modelo15 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time", index = c("country", "year"))
+    modelo15 <- plm(g.avg5.realgdp.pc ~ debt_gdp + lag(g.realgdp.pc,1) + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada, effect = "time", index = c("country", "year"))
     summary(modelo15, vcov = vcovNW)
-    #Resultado: 0.0075700 sem significância
+    #Resultado: 0.016367 sem significância
   
   #Com FE de tempo e de país 
     
     #Crescimento Contemporâneo; Sem Controle
     modelo16 <- plm(g.realgdp.pc ~ debt_gdp, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo16, vcov = vcovNW)  
-    #Resultado: -0.00701 com significância a 0.05
+    #Resultado: -0.02795 com significância a 0.01
     
     #Crescimento Médio Futuro; Sem Controle
     modelo17 <- plm(g.avg5.realgdp.pc ~ debt_gdp, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo17, vcov = vcovNW)
-    #Resultado: -0.000688 sem significância
+    #Resultado: 0.0115 sem significância
     
     #Crescimento Médio Futuro; Com Controle
-    modelo18 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
+    modelo18 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + inflation, data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo18, vcov = vcovNW)
-    #Resultado: 0.0110775 sem significância 
+    #Resultado: -0.001763 sem significância 
     
   #Com FE de tempo e de país + IV da dívida em t-5
     
     #Crescimento Contemporâneo; Sem Controle
     modelo19 <- plm(g.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo19, vcov = vcovNW)  
-    #Resultado: 0.0224 com significância a 0.05
+    #Resultado: 0.0445 sem significância
     
     #Crescimento Médio Futuro; Sem Controle
     modelo20 <- plm(g.avg5.realgdp.pc ~ debt_gdp| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo20, vcov = vcovNW)
-    #Resultado: 0.0281 sem significância
+    #Resultado: 0.0947 com significância a 0.05
     
     #Crescimento Médio Futuro; Com Controle
-    modelo21 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
+    modelo21 <- plm(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share +  inflation| . - debt_gdp + lag(debt_gdp,5), data = Base_Consolidada,model = "within", effect = "twoways",index = c("country", "year"))
     summary(modelo21, vcov = vcovNW)
-    #Resultado: 0.023057 sem significância 
+    #Resultado: 0.095749 sem significância 
     
-    plmtest(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share + gross_savings+ inflation| . - debt_gdp + lag(debt_gdp,5),data = Base_Consolidada, effect = "twoways", type ="ghm")
+    plmtest(g.avg5.realgdp.pc ~ debt_gdp + pop + g.pop + age_dependency + realgdp.pc + urban_pop + exchg_rate + trade.gdp + g_share +  inflation| . - debt_gdp + lag(debt_gdp,5),data = Base_Consolidada, effect = "twoways", type ="ghm")
     #rejeita-se a hipótese de
+    
+    
+
+    
+    
+#D) Robustez ####
+    
+  
+    
+    
     
     
